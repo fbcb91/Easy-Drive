@@ -30,7 +30,7 @@ test('the page compares Easy and fastest routes', { skip: !chromium && 'playwrig
     });
     await page.route(/nominatim\.openstreetmap\.org\/reverse/, (r) => r.fulfill({ json: {} }));
     const blankTile = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=', 'base64');
-    await page.route(/basemaps\.cartocdn\.com/, (r) => r.fulfill({ body: blankTile, contentType: 'image/png' }));
+    await page.route(/tile\.openstreetmap\.org/, (r) => r.fulfill({ body: blankTile, contentType: 'image/png' }));
     await page.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
 
     await page.goto(`http://localhost:${port}/`);

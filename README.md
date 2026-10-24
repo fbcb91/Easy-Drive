@@ -103,7 +103,7 @@ npm run test:e2e  # pagina web nel browser (richiede Playwright)
 - Strade: © [OpenStreetMap](https://www.openstreetmap.org/copyright), tramite
   l'API Overpass.
 - Ricerca indirizzi: Nominatim (OpenStreetMap).
-- Mappa di sfondo: CARTO.
+- Mappa di sfondo: tessere standard di OpenStreetMap.
 - Mappa interattiva: [Leaflet](https://leafletjs.com) 1.9.4, in `vendor/`.
 
 Questi servizi pubblici vanno bene per un prototipo, ma non per un'app con

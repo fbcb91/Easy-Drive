@@ -13,6 +13,7 @@
   --alert: #c2362f;
   --route-casing: #ffffff;
   --focus: #1b55a3;
+  --tile-filter: saturate(0.55) contrast(0.95);
   --font-display: 'Barlow Semi Condensed', 'Arial Narrow', 'Roboto Condensed', sans-serif;
   --font-body: 'Barlow', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   --radius: 6px;
@@ -23,12 +24,14 @@
     --bg: #0e141a; --surface: #161f28; --ink: #e6ebf0; --muted: #93a1af; --line: #2a3643;
     --easy: #5a9aec; --easy-soft: #19293d; --fast: #e08b5d; --fast-soft: #33231b; --alert: #ef6b60;
     --route-casing: #0e141a; --focus: #5a9aec; color-scheme: dark;
+    --tile-filter: invert(1) hue-rotate(180deg) saturate(0.4) brightness(0.85) contrast(0.9);
   }
 }
 :root[data-theme="dark"] {
   --bg: #0e141a; --surface: #161f28; --ink: #e6ebf0; --muted: #93a1af; --line: #2a3643;
   --easy: #5a9aec; --easy-soft: #19293d; --fast: #e08b5d; --fast-soft: #33231b; --alert: #ef6b60;
   --route-casing: #0e141a; --focus: #5a9aec; color-scheme: dark;
+    --tile-filter: invert(1) hue-rotate(180deg) saturate(0.4) brightness(0.85) contrast(0.9);
 }
 
 * { box-sizing: border-box; }
@@ -220,6 +223,7 @@ a { color: var(--easy); }
 /* Leaflet tweaks */
 .leaflet-container { font: inherit; background: var(--bg); }
 .leaflet-div-icon { background: none; border: 0; }
+.leaflet-tile-pane { filter: var(--tile-filter); }
 
 /* Phones: map on top, panel scrolls underneath */
 @media (max-width: 759px) {

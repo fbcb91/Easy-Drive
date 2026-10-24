@@ -31,6 +31,7 @@ const state = {
   selected: 'easy',
   layers: [],
   busy: false,
+  pending: false,
 };
 
 // ---------- Map ----------
@@ -38,20 +39,11 @@ const state = {
 const map = L.map('map', { zoomControl: false, preferCanvas: true }).setView(TORINO.center, 13);
 L.control.zoom({ position: 'topright' }).addTo(map);
 
-const dark = window.matchMedia('(prefers-color-scheme: dark)');
-let tiles;
-function setTiles() {
-  const theme = document.documentElement.dataset.theme;
-  const isDark = theme ? theme === 'dark' : dark.matches;
-  if (tiles) tiles.remove();
-  tiles = L.tileLayer(`https://{s}.basemaps.cartocdn.com/${isDark ? 'dark_all' : 'light_all'}/{z}/{x}/{y}{r}.png`, {
-    maxZoom: 19,
-    subdomains: 'abcd',
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
-  }).addTo(map);
-}
-setTiles();
-dark.addEventListener('change', setTiles);
+// Standard OpenStreetMap tiles; css/style.css tones them down and darkens them in dark mode.
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19,
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+}).addTo(map);
 
 function pinIcon(kind) {
   return L.divIcon({
@@ -174,7 +166,12 @@ const tick = () => new Promise((r) => setTimeout(r, 30));
 
 async function plan() {
   const { from, to } = state.points;
-  if (!from || !to || state.busy) return;
+  if (!from || !to) return;
+  if (state.busy) {
+    // A point changed while computing: run again with the new points afterwards.
+    state.pending = true;
+    return;
+  }
   if (distance(from.latlng, to.latlng) > MAX_TRIP_M) {
     setStatus(ERRORS['too-far'], 'error');
     return;
@@ -205,6 +202,10 @@ async function plan() {
   } finally {
     state.busy = false;
     $('plan').disabled = false;
+  }
+  if (state.pending) {
+    state.pending = false;
+    plan();
   }
 }
 
