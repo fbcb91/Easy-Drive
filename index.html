@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Easy Drive Torino</title>
+  <meta name="description" content="Il navigatore che sceglie il percorso più semplice, come farebbe chi conosce la città.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="panel">
+      <header class="brand">
+        <h1>Easy Drive</h1>
+        <span class="brand-tag">Torino · prototipo</span>
+      </header>
+      <p class="pitch">Il percorso più semplice, non solo il più veloce: meno svolte, strade scorrevoli, come lo faresti tu che conosci la città.</p>
+
+      <section class="trip" aria-label="Tragitto">
+        <form id="from-form" class="field">
+          <label for="from-input"><span class="pin pin-from">A</span>Partenza</label>
+          <input id="from-input" type="search" autocomplete="off" placeholder="Via, piazza o luogo a Torino" enterkeyhint="search">
+        </form>
+        <button id="swap" type="button" class="swap" aria-label="Inverti partenza e arrivo" title="Inverti partenza e arrivo">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4v16M3 8l4-4 4 4M17 20V4M13 16l4 4 4-4"/></svg>
+        </button>
+        <form id="to-form" class="field">
+          <label for="to-input"><span class="pin pin-to">B</span>Arrivo</label>
+          <input id="to-input" type="search" autocomplete="off" placeholder="Via, piazza o luogo a Torino" enterkeyhint="search">
+        </form>
+        <p id="click-hint" class="hint"></p>
+      </section>
+
+      <section class="prefs" aria-label="Preferenze">
+        <div class="slider">
+          <label for="extra">Tempo in più che accetto per un percorso più semplice</label>
+          <div class="slider-row">
+            <input id="extra" type="range" min="0" max="10" step="1" value="4">
+            <output id="extra-value" for="extra">4 min</output>
+          </div>
+        </div>
+        <label class="check" for="avoid-ztl">
+          <input id="avoid-ztl" type="checkbox" checked>
+          Evita strade con divieti a orario (ZTL, corsie riservate)
+        </label>
+        <button id="plan" type="button" class="primary">Calcola percorso</button>
+      </section>
+
+      <p id="status" class="status" role="status" hidden></p>
+
+      <section id="results" class="results" hidden aria-live="polite">
+        <p id="summary" class="summary"></p>
+        <div id="cards" class="cards"></div>
+        <h2 id="steps-title" class="steps-title">Istruzioni</h2>
+        <ol id="steps" class="steps"></ol>
+      </section>
+
+      <footer class="credits">
+        Dati stradali © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>.
+        Tempi stimati con velocità reali tipiche, non con i limiti.
+      </footer>
+    </aside>
+    <main id="map" class="map" aria-label="Mappa di Torino"></main>
+  </div>
+
+  <script src="vendor/leaflet/leaflet.js"></script>
+  <script type="module" src="src/app.js"></script>
+</body>
+</html>
