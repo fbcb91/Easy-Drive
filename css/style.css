@@ -10,6 +10,8 @@
   --easy-soft: #e3ecf8;
   --fast: #b45a2c;
   --fast-soft: #f6e9e1;
+  --mine: #2c7a4b;
+  --mine-soft: #e2f1e7;
   --alert: #c2362f;
   --route-casing: #ffffff;
   --focus: #1b55a3;
@@ -22,14 +24,14 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #0e141a; --surface: #161f28; --ink: #e6ebf0; --muted: #93a1af; --line: #2a3643;
-    --easy: #5a9aec; --easy-soft: #19293d; --fast: #e08b5d; --fast-soft: #33231b; --alert: #ef6b60;
+    --easy: #5a9aec; --easy-soft: #19293d; --fast: #e08b5d; --fast-soft: #33231b; --mine: #5fc38a; --mine-soft: #18302a; --alert: #ef6b60;
     --route-casing: #0e141a; --focus: #5a9aec; color-scheme: dark;
     --tile-filter: invert(1) hue-rotate(180deg) saturate(0.4) brightness(0.85) contrast(0.9);
   }
 }
 :root[data-theme="dark"] {
   --bg: #0e141a; --surface: #161f28; --ink: #e6ebf0; --muted: #93a1af; --line: #2a3643;
-  --easy: #5a9aec; --easy-soft: #19293d; --fast: #e08b5d; --fast-soft: #33231b; --alert: #ef6b60;
+  --easy: #5a9aec; --easy-soft: #19293d; --fast: #e08b5d; --fast-soft: #33231b; --mine: #5fc38a; --mine-soft: #18302a; --alert: #ef6b60;
   --route-casing: #0e141a; --focus: #5a9aec; color-scheme: dark;
     --tile-filter: invert(1) hue-rotate(180deg) saturate(0.4) brightness(0.85) contrast(0.9);
 }
@@ -197,8 +199,11 @@ a { color: var(--easy); }
 .route-stats strong { color: var(--ink); font-variant-numeric: tabular-nums; }
 .route-easy.is-selected { border-color: var(--easy); background: var(--easy-soft); }
 .route-fast.is-selected { border-color: var(--fast); background: var(--fast-soft); }
+.route-mine { grid-column: 1 / -1; }
+.route-mine .route-title { color: var(--mine); }
+.route-mine.is-selected { border-color: var(--mine); background: var(--mine-soft); }
 
-.steps-title {
+.section-title {
   margin: 8px 0 0;
   font: 600 13px/1 var(--font-display); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted);
 }
@@ -218,6 +223,41 @@ a { color: var(--easy); }
   font: 600 11px/1 var(--font-display); text-transform: uppercase; letter-spacing: 0.06em;
   color: var(--alert); border: 1px solid currentColor; border-radius: 3px; padding: 3px 5px 2px; margin-top: 3px;
 }
+/* Secondary blocks: own route, stress table, save */
+.block { display: flex; flex-direction: column; gap: 8px; }
+.block-help { margin: 0; font-size: 13px; color: var(--muted); }
+.block-actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.secondary {
+  align-self: flex-start;
+  font: 600 15px/1 var(--font-display); letter-spacing: 0.03em;
+  color: var(--ink); background: var(--surface);
+  border: 1.5px solid var(--ink); border-radius: var(--radius);
+  padding: 10px 14px; cursor: pointer;
+}
+.secondary:hover { border-color: var(--easy); color: var(--easy); }
+.secondary[aria-pressed="true"] { background: var(--mine); border-color: var(--mine); color: #fff; }
+.link { font: inherit; font-size: 14px; color: var(--alert); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; }
+.verdict { margin: 0; padding: 10px 12px; border-left: 3px solid var(--mine); background: var(--mine-soft); font-size: 14px; border-radius: 0 var(--radius) var(--radius) 0; }
+textarea {
+  font: inherit; font-size: 14px; color: var(--ink); background: var(--bg);
+  border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 10px; resize: vertical;
+}
+textarea:focus { border-color: var(--easy); outline: none; box-shadow: 0 0 0 3px var(--easy-soft); }
+.table-wrap { overflow-x: auto; }
+.why { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+.why th, .why td { padding: 6px 4px; border-bottom: 1px solid var(--line); text-align: right; }
+.why th[scope="row"] { text-align: left; font-weight: 500; color: var(--muted); }
+.why thead th { font: 700 12px/1 var(--font-display); text-transform: uppercase; letter-spacing: 0.06em; }
+.why .col-easy { color: var(--easy); }
+.why .col-fast { color: var(--fast); }
+.why .col-mine { color: var(--mine); }
+.why td.is-best { font-weight: 700; }
+.why tr.total th, .why tr.total td { border-bottom: 0; font-weight: 700; color: var(--ink); }
+.status[data-kind="ok"] { color: var(--mine); background: var(--mine-soft); }
+.pin-via { background: var(--mine); }
+.leaflet-marker-icon .pin-via { width: 24px; height: 24px; font-size: 12px; }
+.is-drawing .leaflet-container { cursor: crosshair; }
+
 .credits { margin-top: auto; font-size: 12px; color: var(--muted); }
 
 /* Leaflet tweaks */

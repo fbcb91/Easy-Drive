@@ -77,11 +77,12 @@ export function buildSteps(graph, route) {
 }
 
 export function countStress(graph, route) {
-  const counts = { maneuvers: 0, left: 0, right: 0, roundabouts: 0, close: 0, uturns: 0 };
+  const counts = { maneuvers: 0, left: 0, right: 0, roundabouts: 0, close: 0, uturns: 0, major: 0, narrowKm: 0 };
   const streets = new Set();
   for (const leg of route.legs) {
     const edge = graph.edges[leg.edge];
     if (leg.length > 30) streets.add(edge.roundabout ? `rotonda-${edge.wayId}` : streetLabel(edge));
+    if (edge.rank <= 1) counts.narrowKm += leg.length / 1000;
     const t = leg.turn;
     if (!t || !t.maneuver) continue;
     counts.maneuvers++;
@@ -89,6 +90,7 @@ export function countStress(graph, route) {
     if (t.kind === 'right' || t.kind === 'slight-right') counts.right++;
     if (t.kind === 'roundabout') counts.roundabouts++;
     if (t.kind === 'uturn') counts.uturns++;
+    if (t.ontoMajor) counts.major++;
     if (leg.close) counts.close++;
   }
   counts.streets = streets.size;

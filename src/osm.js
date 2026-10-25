@@ -47,3 +47,36 @@ export async function fetchRoads(bbox, { signal } = {}) {
   }
   throw lastError;
 }
+
+const KEPT_TAGS = /^(highway|name|ref|oneway|junction|lanes|maxspeed|access|motor_vehicle|motorcar|vehicle|area|restriction(:motorcar)?|type|.*:conditional)$/;
+
+// Keeps only what the router needs (drivable roads touching the box, their
+// nodes, turn restrictions), so a saved trip stays a few MB at most.
+export function compactOsm(osm, bbox) {
+  const [s, w, n, e] = bbox;
+  const nodes = new Map();
+  for (const el of osm.elements) if (el.type === 'node') nodes.set(el.id, el);
+  const inside = (id) => {
+    const p = nodes.get(id);
+    return p && p.lat >= s && p.lat <= n && p.lon >= w && p.lon <= e;
+  };
+  const pickTags = (tags) => Object.fromEntries(Object.entries(tags || {}).filter(([k]) => KEPT_TAGS.test(k)));
+  const ways = osm.elements.filter((el) => el.type === 'way' && el.tags?.highway && el.nodes.some(inside));
+  const wayIds = new Set(ways.map((wy) => wy.id));
+  const usedNodes = new Set(ways.flatMap((wy) => wy.nodes));
+  const elements = [];
+  for (const id of usedNodes) {
+    const p = nodes.get(id);
+    if (!p) continue;
+    const node = { type: 'node', id, lat: +p.lat.toFixed(7), lon: +p.lon.toFixed(7) };
+    if (p.tags?.highway === 'traffic_signals') node.tags = { highway: 'traffic_signals' };
+    elements.push(node);
+  }
+  for (const wy of ways) elements.push({ type: 'way', id: wy.id, nodes: wy.nodes, tags: pickTags(wy.tags) });
+  for (const el of osm.elements) {
+    if (el.type === 'relation' && el.members?.some((m) => m.type === 'way' && wayIds.has(m.ref))) {
+      elements.push({ type: 'relation', id: el.id, members: el.members, tags: pickTags(el.tags) });
+    }
+  }
+  return { bbox, elements };
+}

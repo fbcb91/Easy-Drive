@@ -55,7 +55,32 @@
       <section id="results" class="results" hidden aria-live="polite">
         <p id="summary" class="summary"></p>
         <div id="cards" class="cards"></div>
-        <h2 id="steps-title" class="steps-title">Istruzioni</h2>
+
+        <section class="block" aria-labelledby="mine-title">
+          <h2 id="mine-title" class="section-title">Il mio percorso</h2>
+          <p class="block-help">Fai vedere la strada che faresti tu: aggiungi delle tappe sulle vie che prenderesti. Trascina una tappa per spostarla, toccala per toglierla.</p>
+          <div class="block-actions">
+            <button id="mine-toggle" type="button" class="secondary" aria-pressed="false">Traccia il mio percorso</button>
+            <button id="mine-clear" type="button" class="link" hidden>Togli le tappe</button>
+          </div>
+          <p id="mine-verdict" class="verdict" hidden></p>
+        </section>
+
+        <section class="block" aria-labelledby="why-title">
+          <h2 id="why-title" class="section-title">Da dove viene lo stress</h2>
+          <div class="table-wrap"><table id="why-table" class="why"></table></div>
+          <p id="why-text" class="block-help"></p>
+        </section>
+
+        <section class="block" aria-labelledby="save-title">
+          <h2 id="save-title" class="section-title">Aiuta a tarare l'app</h2>
+          <label for="save-note" class="block-help">Perché preferisci il tuo percorso? (facoltativo)</label>
+          <textarea id="save-note" rows="2" placeholder="Es. corso Vittorio scorre meglio, via Sacchi è sempre intasata"></textarea>
+          <button id="save-trip" type="button" class="secondary">Salva tragitto</button>
+          <p class="block-help">Scarica un file con il tragitto e le strade della zona. Mandalo: serve a provare e tarare il modello su Torino.</p>
+        </section>
+
+        <h2 id="steps-title" class="section-title">Istruzioni</h2>
         <ol id="steps" class="steps"></ol>
       </section>
 

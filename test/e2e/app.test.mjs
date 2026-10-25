@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import { readFile } from 'node:fs/promises';
 import { startServer } from '../../scripts/serve.mjs';
 import { zigzagCity, toLatLon } from '../fixtures.js';
 
@@ -17,6 +18,7 @@ test('the page compares Easy and fastest routes', { skip: !chromium && 'playwrig
   const server = await startServer(0);
   const { port } = server.address();
   const browser = await chromium.launch();
+  // acceptDownloads is on by default for new pages.
   try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 860 } });
     const errors = [];
@@ -59,11 +61,37 @@ test('the page compares Easy and fastest routes', { skip: !chromium && 'playwrig
     await page.fill('#extra', '0');
     assert.equal(await page.locator('.route-card').count(), 1);
 
+    await page.fill('#extra', '4');
+    await page.waitForTimeout(800); // let the map finish its zoom animation
+
+    // Trace the driver's own route through the zig-zag with one waypoint.
+    await page.click('#mine-toggle');
+    const a = await page.locator('.leaflet-marker-pane .pin-from').boundingBox();
+    const b = await page.locator('.leaflet-marker-pane .pin-to').boundingBox();
+    await page.mouse.click((a.x + b.x) / 2 + a.width / 2, (a.y + b.y) / 2 + a.height / 2);
+    await page.waitForSelector('.route-mine');
+    assert.match(await page.textContent('.route-mine'), /11\s*manovre/);
+    assert.match(await page.textContent('#mine-verdict'), /più stressante .* soprattutto per manovre e manovre ravvicinate/);
+    assert.equal(await page.textContent('#steps-title'), 'Istruzioni · il tuo percorso');
+    assert.equal(await page.locator('#why-table thead th').count(), 4);
+    await page.click('#mine-toggle');
+
+    // Saving downloads a trip file with the driver's route and the road data.
+    await page.fill('#save-note', 'Preferisco i vicoli');
+    const [download] = await Promise.all([page.waitForEvent('download'), page.click('#save-trip')]);
+    assert.equal(download.suggestedFilename(), 'tragitto-piazza-statuto--piazza-vittorio.json');
+    const trip = JSON.parse(await readFile(await download.path(), 'utf8'));
+    assert.equal(trip.note, 'Preferisco i vicoli');
+    assert.equal(trip.via.length, 1);
+    assert.equal(trip.results.mine.counts.maneuvers, 11);
+    assert.ok(trip.osm.elements.length > 20);
+
     if (process.env.SCREENSHOT_DIR) {
-      await page.fill('#extra', '4');
       await page.click('.route-easy');
-      await page.waitForTimeout(800); // let the map finish its zoom animation
+      await page.waitForTimeout(300);
       await page.screenshot({ path: `${process.env.SCREENSHOT_DIR}/desktop.png` });
+      await page.locator('#why-title').scrollIntoViewIfNeeded();
+      await page.screenshot({ path: `${process.env.SCREENSHOT_DIR}/desktop-why.png` });
       await page.setViewportSize({ width: 400, height: 860 });
       await page.waitForTimeout(800);
       await page.screenshot({ path: `${process.env.SCREENSHOT_DIR}/phone.png` });

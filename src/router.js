@@ -25,20 +25,21 @@ export function describeTurn(graph, a, b, options) {
   const ontoMajor = !signal && eb.rank > ea.rank && eb.rank >= majorRank;
 
   let time = signal ? SIGNAL_DELAY_S : 0;
-  let stress = 0;
   let maneuver = false;
   let kind = 'straight';
+  // Stress split by cause, so the app can explain its choices.
+  const parts = { maneuver: 0, left: 0, major: 0 };
 
   if (uturn) {
     kind = 'uturn';
     maneuver = true;
     time += TURN_TIME_S.uturn;
-    stress += STRESS.maneuver + STRESS.uturn;
+    parts.maneuver = STRESS.maneuver + STRESS.uturn;
   } else if (eb.roundabout && !ea.roundabout) {
     kind = 'roundabout';
     maneuver = true;
     time += TURN_TIME_S.roundabout;
-    stress += STRESS.roundabout;
+    parts.maneuver = STRESS.roundabout;
   } else if (ea.roundabout) {
     kind = eb.roundabout ? 'straight' : 'exit';
   } else {
@@ -53,16 +54,20 @@ export function describeTurn(graph, a, b, options) {
     if (abs >= ANGLE.sharp) time += TURN_TIME_S.sharp;
     if (ontoMajor) time += TURN_TIME_S.yieldMajor;
     if (maneuver) {
-      stress += STRESS.maneuver;
-      if (kind === 'left') stress += STRESS.left;
-      if (abs >= ANGLE.sharp) stress += STRESS.sharp;
-      if (ontoMajor) stress += kind === 'left' ? STRESS.unsignalizedLeftOntoMajor : STRESS.unsignalizedOntoMajor;
+      parts.maneuver = STRESS.maneuver + (abs >= ANGLE.sharp ? STRESS.sharp : 0);
+      if (kind === 'left') parts.left = STRESS.left;
+      if (ontoMajor) parts.major = kind === 'left' ? STRESS.unsignalizedLeftOntoMajor : STRESS.unsignalizedOntoMajor;
     }
   }
-  return { to: b, angle, kind, maneuver, time, stress };
+  const stress = parts.maneuver + parts.left + parts.major;
+  return { to: b, angle, kind, maneuver, time, stress, parts, signal, ontoMajor: maneuver && ontoMajor };
 }
 
+// Same street = same name (or ref) on a road of similar importance. A corso's
+// side lane (controviale) shares the name but is a much smaller road, so
+// moving onto it is a real maneuver.
 function sameStreet(a, b) {
+  if (Math.abs(a.rank - b.rank) > 1) return false;
   if (a.name && a.name === b.name) return true;
   if (a.ref && a.ref === b.ref) return true;
   return !a.name && !b.name && a.wayId === b.wayId;
@@ -182,31 +187,77 @@ export function route(graph, start, end, { lambda = 0, avoidRestricted = true } 
 // Turns a chain of states into a route with geometry and honest metrics.
 function summarize(graph, steps, targets, lambda) {
   const { edges } = graph;
-  const first = steps[0];
-  const last = steps[steps.length - 1];
-  const endT = targets.get(last.edge);
-  const legs = [];
-  let time = 0, stress = 0, distance = 0;
+  const endT = targets.get(steps[steps.length - 1].edge);
   const coords = [];
-
-  steps.forEach((step, i) => {
+  const legs = steps.map((step, i) => {
     const e = edges[step.edge];
-    const from = i === 0 ? first.startT : 0;
+    const from = i === 0 ? steps[0].startT : 0;
     const to = i === steps.length - 1 ? endT : 1;
-    const frac = Math.max(0, to - from);
     const piece = slicePolyline(e.geom, from, to);
     coords.push(...(coords.length ? piece.slice(1) : piece));
-    if (step.turn) {
-      time += step.turn.time;
-      stress += step.turn.stress + step.close;
-    }
-    time += e.timeS * frac;
-    stress += e.stress * frac;
-    distance += e.length * frac;
-    legs.push({ edge: step.edge, turn: step.turn || null, close: !!step.close, length: e.length * frac });
+    return { edge: step.edge, from, to, turn: step.turn || null, close: !!step.close };
   });
+  return { lambda, legs, coords, ...measure(graph, legs) };
+}
 
-  return { lambda, legs, coords, time, stress, distance, key: steps.map((s) => s.edge).join(',') };
+// Time, distance and stress (split by cause) of a list of legs.
+export function measure(graph, legs) {
+  const breakdown = { maneuver: 0, left: 0, major: 0, close: 0, narrow: 0 };
+  let time = 0, distance = 0, signals = 0;
+  for (const leg of legs) {
+    const e = graph.edges[leg.edge];
+    const frac = Math.max(0, leg.to - leg.from);
+    leg.length = e.length * frac;
+    if (leg.turn) {
+      time += leg.turn.time;
+      breakdown.maneuver += leg.turn.parts.maneuver;
+      breakdown.left += leg.turn.parts.left;
+      breakdown.major += leg.turn.parts.major;
+      if (leg.turn.signal) signals++;
+    }
+    if (leg.close) breakdown.close += STRESS.close;
+    time += e.timeS * frac;
+    breakdown.narrow += e.stress * frac;
+    distance += leg.length;
+  }
+  const stress = Object.values(breakdown).reduce((a, b) => a + b, 0);
+  return { time, distance, stress, breakdown, signals, key: legs.map((l) => l.edge).join(',') };
+}
+
+// Chains routes that meet at waypoints (A → tappa → … → B) into one route,
+// adding the turn the driver makes at each waypoint.
+export function joinRoutes(graph, parts) {
+  const legs = parts[0].legs.map((l) => ({ ...l }));
+  const coords = [...parts[0].coords];
+  for (const part of parts.slice(1)) {
+    const next = part.legs.map((l) => ({ ...l }));
+    const last = legs[legs.length - 1];
+    if (next[0].edge === last.edge && next[0].from >= last.to - 1e-6) {
+      // The waypoint is in the middle of a road we keep driving on.
+      last.to = next[0].to;
+      next.shift();
+    } else {
+      next[0].turn = successors(graph, last.edge).find((t) => t.to === next[0].edge) || uturnAt(graph, next[0].edge);
+    }
+    legs.push(...next);
+    coords.push(...part.coords.slice(1));
+  }
+  // Each part was searched on its own, so redo "close maneuver" flags across the joins.
+  for (let i = 1; i < legs.length; i++) {
+    const prev = legs[i - 1];
+    legs[i].close = !!(legs[i].turn?.maneuver && prev.turn?.maneuver && graph.edges[prev.edge].length < CLOSE_MANEUVER_M);
+  }
+  return { lambda: null, legs, coords, ...measure(graph, legs) };
+}
+
+// Turning back on the same road at a waypoint (only happens if the driver asks for it).
+function uturnAt(graph, edge) {
+  return {
+    to: edge, angle: 180, kind: 'uturn', maneuver: true, signal: false, ontoMajor: false,
+    time: TURN_TIME_S.uturn,
+    stress: STRESS.maneuver + STRESS.uturn,
+    parts: { maneuver: STRESS.maneuver + STRESS.uturn, left: 0, major: 0 },
+  };
 }
 
 class MinHeap {

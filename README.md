@@ -27,6 +27,20 @@ confronto: **Easy** in blu e **Più veloce** tratteggiato. Per ciascuno vedi
 tempo, chilometri, manovre, svolte a sinistra e manovre ravvicinate. I pallini
 sulla mappa segnano ogni manovra; quelli rossi sono le manovre ravvicinate.
 
+### Insegnare all'app come guidi tu
+
+- **Il mio percorso**: premi *Traccia il mio percorso* e tocca la mappa sulle
+  vie che prenderesti tu. Ogni tocco aggiunge una tappa, e tra una tappa e
+  l'altra l'app usa le strade più veloci. Il tuo percorso compare in verde,
+  accanto a Easy e al più veloce, con un giudizio: coincide con Easy, oppure
+  il modello lo considera più stressante e spiega perché.
+- **Da dove viene lo stress**: una tabella mette a confronto i percorsi voce
+  per voce (manovre, svolte a sinistra, immissioni senza semaforo, manovre
+  ravvicinate, km su vie piccole, semafori).
+- **Salva tragitto**: scarica un file `tragitto-….json` con il tragitto, il
+  tuo percorso, una nota facoltativa e le strade della zona. Questi file
+  servono a provare e tarare il modello su Torino (vedi sotto).
+
 Le strade vengono scaricate al momento da OpenStreetMap (servizio Overpass)
 per la zona del tragitto, quindi la prima ricerca in una zona richiede qualche
 secondo. Le ricerche successive nella stessa zona sono immediate.
@@ -80,7 +94,22 @@ di ogni manovra. Lì entra la conoscenza di chi guida a Torino tutti i giorni.
 | `src/router.js` | Algoritmo di percorso tempo + stress |
 | `src/planner.js` | Prova vari λ e sceglie il percorso Easy |
 | `src/instructions.js` | Istruzioni di guida in italiano e conteggi |
+| `src/trips.js` | Formato dei tragitti salvati |
+| `scripts/check-trips.mjs` | Ricalcola i tragitti salvati e li confronta con Easy |
 | `src/config.js` | Tutti i parametri da tarare |
+
+## Tarare il modello con i tragitti salvati
+
+Metti i file salvati nella cartella `trips/` e lancia:
+
+```bash
+node scripts/check-trips.mjs
+```
+
+Per ogni tragitto lo script ricalcola Easy con i parametri attuali, lo
+confronta con il tuo percorso e dice quanta strada hanno in comune e da dove
+viene lo stress di ciascuno. Dopo ogni modifica a `src/config.js` si rilancia
+per vedere se Easy si avvicina ai percorsi che faresti tu.
 
 ## Test
 

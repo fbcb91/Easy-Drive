@@ -2,9 +2,10 @@
 /* global L */
 
 import { buildGraph } from './graph.js';
-import { planCandidates, choose, PlanError } from './planner.js';
+import { planCandidates, planVia, choose, overlap, PlanError } from './planner.js';
 import { fetchRoads, tripBBox, MAX_TRIP_M } from './osm.js';
 import { bboxContains, distance, expandBBox } from './geo.js';
+import { makeTrip, tripFileName } from './trips.js';
 
 const TORINO = { center: [45.0703, 7.6869], viewbox: '7.55,45.15,7.80,44.98' };
 const EXAMPLE = {
@@ -16,6 +17,8 @@ const ERRORS = {
   'end-off-road': "L'arrivo è lontano da strade percorribili in auto. Spostalo su una strada.",
   'no-route': 'Non ho trovato un percorso tra i due punti. Prova a spostarli su strade vicine.',
   'too-far': 'Il prototipo gestisce tragitti fino a circa 25 km. Avvicina i due punti.',
+  'via-off-road': 'Una tappa è lontana da strade percorribili in auto. Spostala su una strada.',
+  'via-outside': 'Questa tappa è fuori dalla zona scaricata. Mettila più vicino al tragitto.',
   network: 'Non riesco a scaricare le strade da OpenStreetMap. Il servizio potrebbe essere occupato: riprova tra qualche secondo.',
 };
 
@@ -24,7 +27,10 @@ const state = {
   points: { from: null, to: null },
   markers: { from: null, to: null },
   nextClick: 'from',
-  cache: null, // { bbox, graph }
+  drawing: false, // true while the driver is adding waypoints for their own route
+  via: [], // [{ latlng, marker }]
+  mine: null,
+  cache: null, // { bbox, graph, osm }
   graph: null,
   candidates: null,
   choice: null,
@@ -76,6 +82,10 @@ function coordLabel([lat, lon]) {
 
 map.on('click', (e) => {
   const latlng = [e.latlng.lat, e.latlng.lng];
+  if (state.drawing) {
+    addVia(latlng);
+    return;
+  }
   const kind = state.nextClick;
   setPoint(kind, latlng, coordLabel(latlng));
   reverseLabel(kind, latlng);
@@ -85,10 +95,90 @@ map.on('click', (e) => {
 });
 
 function updateClickHint() {
-  $('click-hint').textContent = state.nextClick === 'from'
-    ? 'Tocca la mappa per scegliere la partenza.'
-    : "Tocca la mappa per scegliere l'arrivo.";
+  $('click-hint').textContent = state.drawing
+    ? 'Tocca la mappa sulle vie che prenderesti tu per aggiungere una tappa.'
+    : state.nextClick === 'from'
+      ? 'Tocca la mappa per scegliere la partenza.'
+      : "Tocca la mappa per scegliere l'arrivo.";
 }
+
+// ---------- The driver's own route (waypoints) ----------
+
+function viaIcon(n) {
+  return L.divIcon({ className: '', html: `<span class="pin pin-via">${n}</span>`, iconSize: [24, 24], iconAnchor: [12, 12] });
+}
+
+// New waypoints go where they lengthen the route least, so the order of taps doesn't matter.
+function addVia(latlng) {
+  if (!state.cache || !bboxContains(state.cache.bbox, [latlng[0], latlng[1], latlng[0], latlng[1]])) {
+    setStatus(ERRORS['via-outside'], 'error');
+    return;
+  }
+  const chain = [state.points.from.latlng, ...state.via.map((v) => v.latlng), state.points.to.latlng];
+  let best = 0;
+  let bestCost = Infinity;
+  for (let i = 0; i < chain.length - 1; i++) {
+    const cost = distance(chain[i], latlng) + distance(latlng, chain[i + 1]) - distance(chain[i], chain[i + 1]);
+    if (cost < bestCost) {
+      bestCost = cost;
+      best = i;
+    }
+  }
+  const via = { latlng, marker: null };
+  via.marker = L.marker(latlng, { draggable: true, keyboard: false, icon: viaIcon(0) }).addTo(map);
+  via.marker.on('dragend', () => {
+    const p = via.marker.getLatLng();
+    via.latlng = [p.lat, p.lng];
+    planMine();
+  });
+  via.marker.on('click', () => removeVia(via));
+  state.via.splice(best, 0, via);
+  planMine();
+}
+
+function removeVia(via) {
+  via.marker.remove();
+  state.via = state.via.filter((v) => v !== via);
+  planMine();
+}
+
+function clearVia() {
+  for (const v of state.via) v.marker.remove();
+  state.via = [];
+  planMine();
+}
+
+function planMine({ quiet = false } = {}) {
+  state.via.forEach((v, i) => v.marker.setIcon(viaIcon(i + 1)));
+  $('mine-clear').hidden = !state.via.length;
+  if (!state.drawing) setDrawing(false);
+  if (!state.via.length || !state.graph) {
+    state.mine = null;
+    if (state.selected === 'mine') state.selected = 'easy';
+  } else {
+    try {
+      const { from, to } = state.points;
+      state.mine = planVia(state.graph, [from.latlng, ...state.via.map((v) => v.latlng), to.latlng], { avoidRestricted: $('avoid-ztl').checked });
+      if (!quiet) state.selected = 'mine';
+      if (!quiet) setStatus('');
+    } catch (err) {
+      state.mine = null;
+      setStatus(ERRORS[err.code] || ERRORS['no-route'], 'error');
+    }
+  }
+  if (state.candidates) render(false);
+}
+
+function setDrawing(on) {
+  state.drawing = on;
+  $('mine-toggle').textContent = on ? 'Fine' : state.via.length ? 'Modifica il mio percorso' : 'Traccia il mio percorso';
+  $('mine-toggle').setAttribute('aria-pressed', String(on));
+  document.body.classList.toggle('is-drawing', on);
+  updateClickHint();
+}
+
+$('mine-toggle').addEventListener('click', () => setDrawing(!state.drawing));
+$('mine-clear').addEventListener('click', () => clearVia());
 
 // ---------- Search (Nominatim) ----------
 
@@ -186,7 +276,7 @@ async function plan() {
       const osm = await fetchRoads(expandBBox(need, 1000));
       setStatus('Preparo la mappa stradale…', 'busy');
       await tick();
-      state.cache = { bbox: osm.bbox, graph: buildGraph(osm) };
+      state.cache = { bbox: osm.bbox, graph: buildGraph(osm), osm };
     }
     setStatus('Confronto i percorsi…', 'busy');
     await tick();
@@ -194,6 +284,7 @@ async function plan() {
     state.candidates = planCandidates(state.graph, from.latlng, to.latlng, { avoidRestricted: $('avoid-ztl').checked });
     state.selected = 'easy';
     setStatus('');
+    planMine({ quiet: true });
     render(true);
   } catch (err) {
     const code = err instanceof PlanError ? err.code : 'network';
@@ -221,9 +312,18 @@ $('extra').addEventListener('input', () => {
 function render(fit) {
   const choice = choose(state.candidates, Number($('extra').value));
   state.choice = choice;
+  if (choice.same && state.selected === 'fast') state.selected = 'easy';
   renderCards(choice);
-  renderSteps(choice.same || state.selected === 'easy' ? choice.easy : choice.fastest);
+  renderWhy(choice);
+  renderVerdict(choice);
+  renderSteps(selectedRoute());
   drawRoutes(choice, fit);
+}
+
+function selectedRoute() {
+  const { easy, fastest } = state.choice;
+  if (state.selected === 'mine' && state.mine) return state.mine;
+  return state.selected === 'fast' ? fastest : easy;
 }
 
 function minutes(s) {
@@ -234,6 +334,10 @@ function km(m) {
   return `${(m / 1000).toFixed(1).replace('.', ',')} km`;
 }
 
+function decimal(n) {
+  return n.toFixed(1).replace('.', ',');
+}
+
 function plural(n, one, many) {
   return `${n} ${n === 1 ? one : many}`;
 }
@@ -242,12 +346,14 @@ function stat(n, one, many) {
   return `<strong>${n}</strong> ${n === 1 ? one : many}`;
 }
 
+const TITLES = { easy: 'Easy', fast: 'Più veloce', mine: 'Il tuo' };
+
 function renderCards({ fastest, easy, same }) {
   const card = (kind, r, title) => `
-    <button type="button" class="route-card route-${kind}${state.selected === kind || same ? ' is-selected' : ''}" data-kind="${kind}" ${same ? 'disabled' : ''}>
+    <button type="button" class="route-card route-${kind}${state.selected === kind ? ' is-selected' : ''}" data-kind="${kind}" aria-pressed="${state.selected === kind}">
       <span class="route-title">${title}</span>
       <span class="route-time"><strong>${minutes(r.time)}</strong> min</span>
-      <span class="route-meta">${km(r.distance)}</span>
+      <span class="route-meta">${km(r.distance)} · stress ${decimal(r.stress)}</span>
       <span class="route-stats">
         <span>${stat(r.counts.maneuvers, 'manovra', 'manovre')}</span>
         <span>${stat(r.counts.left, 'svolta a sinistra', 'svolte a sinistra')}</span>
@@ -269,13 +375,86 @@ function renderCards({ fastest, easy, same }) {
 
   $('results').hidden = false;
   $('summary').textContent = summary;
-  $('cards').innerHTML = same ? card('easy', easy, 'Easy · anche il più veloce') : card('easy', easy, 'Easy') + card('fast', fastest, 'Più veloce');
+  let html = same ? card('easy', easy, 'Easy · anche il più veloce') : card('easy', easy, 'Easy') + card('fast', fastest, 'Più veloce');
+  if (state.mine) html += card('mine', state.mine, 'Il tuo percorso');
+  $('cards').innerHTML = html;
   for (const btn of $('cards').querySelectorAll('button')) {
     btn.addEventListener('click', () => {
       state.selected = btn.dataset.kind;
       render(false);
     });
   }
+}
+
+// Stress categories, in the words a driver would use.
+const CAUSES = {
+  maneuver: { label: 'manovre', unit: (r) => r.counts.maneuvers },
+  left: { label: 'svolte a sinistra', unit: (r) => r.counts.left },
+  major: { label: 'immissioni senza semaforo', unit: (r) => r.counts.major },
+  close: { label: 'manovre ravvicinate', unit: (r) => r.counts.close },
+  narrow: { label: 'tratti su vie piccole', unit: (r) => `${decimal(r.counts.narrowKm)} km` },
+};
+
+function topCauses(worse, better) {
+  return Object.keys(CAUSES)
+    .map((k) => ({ k, diff: worse.breakdown[k] - better.breakdown[k] }))
+    .filter((c) => c.diff > 0.2)
+    .sort((a, b) => b.diff - a.diff)
+    .slice(0, 2)
+    .map((c) => CAUSES[c.k].label);
+}
+
+function renderWhy({ fastest, easy, same }) {
+  const routes = [['easy', easy]];
+  if (!same) routes.push(['fast', fastest]);
+  if (state.mine) routes.push(['mine', state.mine]);
+  const rows = [
+    ['Tempo', (r) => minutes(r.time), (r) => `${minutes(r.time)} min`],
+    ['Manovre', (r) => r.counts.maneuvers],
+    ['Svolte a sinistra', (r) => r.counts.left],
+    ['Immissioni senza semaforo', (r) => r.counts.major],
+    ['Manovre ravvicinate', (r) => r.counts.close],
+    ['Km su vie piccole', (r) => r.counts.narrowKm, (r) => decimal(r.counts.narrowKm)],
+    ['Semafori', (r) => r.signals],
+    ['Punti stress', (r) => r.stress, (r) => decimal(r.stress)],
+  ];
+  const head = `<tr><th scope="col"></th>${routes.map(([k]) => `<th scope="col" class="col-${k}">${TITLES[k]}</th>`).join('')}</tr>`;
+  const body = rows.map(([label, value, show = value]) => {
+    const best = Math.min(...routes.map(([, r]) => value(r)));
+    const cells = routes.map(([, r]) => {
+      const isBest = routes.length > 1 && Math.abs(value(r) - best) < 1e-9;
+      return `<td${isBest ? ' class="is-best"' : ''}>${show(r)}</td>`;
+    }).join('');
+    return `<tr${label === 'Punti stress' ? ' class="total"' : ''}><th scope="row">${label}</th>${cells}</tr>`;
+  }).join('');
+  $('why-table').innerHTML = `<thead>${head}</thead><tbody>${body}</tbody>`;
+
+  const causes = same ? [] : topCauses(fastest, easy);
+  $('why-text').textContent = causes.length
+    ? `Rispetto al più veloce, Easy toglie stress soprattutto su: ${causes.join(' e ')}. Un punto stress vale più o meno una svolta normale.`
+    : 'Un punto stress vale più o meno una svolta normale. Le svolte a sinistra, le immissioni senza semaforo e le manovre ravvicinate pesano di più.';
+}
+
+function renderVerdict({ easy, fastest }) {
+  const el = $('mine-verdict');
+  const mine = state.mine;
+  el.hidden = !mine;
+  if (!mine) return;
+  const budget = fastest.time + Number($('extra').value) * 60;
+  const shared = overlap(state.graph, easy, mine);
+  let text;
+  if (shared > 0.9) {
+    text = 'Easy fa già la tua stessa strada.';
+  } else if (mine.stress < easy.stress - 0.05 && mine.time <= budget) {
+    text = `Secondo il modello il tuo percorso è più semplice di Easy (stress ${decimal(mine.stress)} contro ${decimal(easy.stress)}), ma la ricerca non l'ha trovato. Salva il tragitto: è un caso da correggere.`;
+  } else if (mine.time > budget) {
+    const extra = minutes(mine.time) - minutes(fastest.time);
+    text = `Il tuo percorso richiede ${plural(extra, 'minuto', 'minuti')} in più del più veloce, oltre il tempo che accetti. Sposta il cursore per confrontarlo alla pari.`;
+  } else {
+    const causes = topCauses(mine, easy);
+    text = `Per il modello il tuo percorso è più stressante (${decimal(mine.stress)} contro ${decimal(easy.stress)})${causes.length ? `, soprattutto per ${causes.join(' e ')}` : ''}. Se per te è più tranquillo, salva il tragitto: serve proprio a tarare l'app.`;
+  }
+  el.textContent = text;
 }
 
 const ICONS = {
@@ -301,7 +480,8 @@ function renderSteps(r) {
       <span class="step-body">${when}<span class="step-text">${escapeHtml(s.text)}</span>${flag}</span>
     </li>`;
   }).join('');
-  $('steps-title').textContent = r === state.choice.fastest && !state.choice.same ? 'Istruzioni · più veloce' : 'Istruzioni · Easy';
+  const kind = state.selected === 'mine' && state.mine ? 'mine' : state.selected === 'fast' && !state.choice.same ? 'fast' : 'easy';
+  $('steps-title').textContent = `Istruzioni · ${{ easy: 'Easy', fast: 'più veloce', mine: 'il tuo percorso' }[kind]}`;
 }
 
 function escapeHtml(s) {
@@ -315,28 +495,59 @@ function cssVar(name) {
 function drawRoutes({ fastest, easy, same }, fit) {
   for (const l of state.layers) l.remove();
   state.layers = [];
-  const selected = same || state.selected === 'easy' ? easy : fastest;
-  const other = selected === easy ? fastest : easy;
-  const color = (r) => cssVar(r === easy ? '--easy' : '--fast');
+  const routes = [['easy', easy, '--easy']];
+  if (!same) routes.push(['fast', fastest, '--fast']);
+  if (state.mine) routes.push(['mine', state.mine, '--mine']);
+  const selected = selectedRoute();
 
-  if (!same) {
-    state.layers.push(L.polyline(other.coords, { color: color(other), weight: 5, opacity: 0.55, dashArray: '2 9', lineCap: 'round' }).addTo(map));
+  for (const [, r, color] of routes) {
+    if (r === selected) continue;
+    state.layers.push(L.polyline(r.coords, { color: cssVar(color), weight: 5, opacity: 0.6, dashArray: '2 9', lineCap: 'round' }).addTo(map));
   }
+  const color = cssVar(routes.find(([, r]) => r === selected)[2]);
   state.layers.push(L.polyline(selected.coords, { color: cssVar('--route-casing'), weight: 10, opacity: 0.9 }).addTo(map));
-  state.layers.push(L.polyline(selected.coords, { color: color(selected), weight: 6, opacity: 1 }).addTo(map));
+  state.layers.push(L.polyline(selected.coords, { color, weight: 6, opacity: 1 }).addTo(map));
   for (const s of selected.steps) {
     if (s.type === 'depart' || s.type === 'arrive') continue;
     state.layers.push(L.circleMarker(s.at, {
-      radius: s.close ? 6 : 4.5, weight: 2.5, color: s.close ? cssVar('--alert') : color(selected),
+      radius: s.close ? 6 : 4.5, weight: 2.5, color: s.close ? cssVar('--alert') : color,
       fillColor: cssVar('--surface'), fillOpacity: 1,
     }).addTo(map));
   }
   if (fit) {
-    const bounds = L.latLngBounds([...fastest.coords, ...easy.coords]);
+    const bounds = L.latLngBounds(routes.flatMap(([, r]) => r.coords));
     const wide = window.matchMedia('(min-width: 760px)').matches;
     map.fitBounds(bounds, wide ? { paddingTopLeft: [40, 40], paddingBottomRight: [40, 40] } : { padding: [24, 24] });
   }
 }
+
+// ---------- Save a trip for tuning ----------
+
+$('save-trip').addEventListener('click', () => {
+  if (!state.choice) return;
+  const trip = makeTrip({
+    from: state.points.from,
+    to: state.points.to,
+    via: state.via.map((v) => v.latlng),
+    note: $('save-note').value.trim(),
+    extraMinutes: Number($('extra').value),
+    avoidRestricted: $('avoid-ztl').checked,
+    osm: state.cache.osm,
+    easy: state.choice.easy,
+    fastest: state.choice.fastest,
+    mine: state.mine,
+  });
+  const name = tripFileName(trip);
+  const url = URL.createObjectURL(new Blob([JSON.stringify(trip)], { type: 'application/json' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  setStatus(`Ho salvato ${name} nella cartella Download.${state.via.length ? '' : ' Per tarare l\'app è più utile con il tuo percorso tracciato.'}`, 'ok');
+});
 
 function setStatus(text, kind = '') {
   const el = $('status');

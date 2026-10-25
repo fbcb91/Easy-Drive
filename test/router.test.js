@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildGraph, onewayDirection, parseMaxspeed, isDrivable } from '../src/graph.js';
-import { route, snap } from '../src/router.js';
-import { planCandidates, choose, PlanError } from '../src/planner.js';
+import { route, snap, successors } from '../src/router.js';
+import { planCandidates, planVia, choose, overlap, PlanError } from '../src/planner.js';
 import { turnAngle, bearing } from '../src/geo.js';
 import { makeCity, zigzagCity, toLatLon } from './fixtures.js';
 
@@ -129,4 +129,66 @@ test('routing a city-sized grid stays fast', () => {
   assert.ok(easy.time <= fastest.time + 240);
   console.log(`grid: ${graph.edges.length} edges, ${candidates.length} candidates in ${ms.toFixed(0)} ms; ` +
     `fastest ${Math.round(fastest.time)}s/${fastest.counts.maneuvers} manovre, easy ${Math.round(easy.time)}s/${easy.counts.maneuvers} manovre`);
+});
+
+test('a corso side lane with the same name is not the same street', () => {
+  // Corso Duca (primary) with its controviale (residential, same name) branching off.
+  const graph = buildGraph(makeCity({
+    ways: [
+      { points: [[0, 0], [200, 0], [400, 0]], tags: { highway: 'primary', name: 'Corso Duca' } },
+      { points: [[200, 0], [260, 15], [400, 15]], tags: res('Corso Duca', { oneway: 'yes' }) },
+    ],
+  }));
+  const nodeAt = (p) => {
+    const [lat, lon] = toLatLon(p);
+    return graph.nodes.findIndex((n) => Math.abs(n.lat - lat) < 1e-7 && Math.abs(n.lon - lon) < 1e-7);
+  };
+  const main = graph.edges.find((e) => e.from === nodeAt([0, 0]) && e.to === nodeAt([200, 0]));
+  const turns = successors(graph, main.id);
+  const side = turns.find((t) => graph.edges[t.to].highway === 'residential');
+  const ahead = turns.find((t) => graph.edges[t.to].highway === 'primary');
+  assert.equal(side.maneuver, true);
+  assert.equal(ahead.maneuver, false);
+});
+
+test('stress breakdown adds up and explains the Easy choice', () => {
+  const graph = buildGraph(zigzagCity());
+  const { fastest, easy } = choose(planCandidates(graph, toLatLon([0, 0]), toLatLon([600, 600])), 4);
+  for (const r of [fastest, easy]) {
+    const sum = Object.values(r.breakdown).reduce((a, b) => a + b, 0);
+    assert.ok(Math.abs(sum - r.stress) < 1e-9);
+  }
+  assert.ok(fastest.breakdown.close > easy.breakdown.close);
+  assert.ok(fastest.breakdown.maneuver > easy.breakdown.maneuver);
+  // Signals passed on the way: (200,0), (400,0), (600,0), (600,200), (600,400).
+  assert.equal(easy.signals, 5);
+});
+
+test('the driver\'s own route follows their waypoints', () => {
+  const graph = buildGraph(zigzagCity());
+  const from = toLatLon([0, 0]);
+  const to = toLatLon([600, 600]);
+  const { easy, fastest } = choose(planCandidates(graph, from, to), 4);
+
+  // A waypoint on Corso Francia reproduces the Easy route.
+  const viaCorso = planVia(graph, [from, toLatLon([350, 0]), to]);
+  assert.equal(viaCorso.key, easy.key);
+  assert.ok(Math.abs(viaCorso.time - easy.time) < 1e-6);
+  assert.ok(Math.abs(viaCorso.stress - easy.stress) < 1e-6);
+  assert.equal(overlap(graph, easy, viaCorso), 1);
+
+  // A waypoint in the middle of the zig-zag reproduces the fastest one.
+  const viaZig = planVia(graph, [from, toLatLon([300, 300]), to]);
+  assert.ok(overlap(graph, fastest, viaZig) > 0.95);
+  assert.equal(viaZig.counts.maneuvers, fastest.counts.maneuvers);
+  assert.equal(viaZig.counts.close, fastest.counts.close);
+  assert.ok(Math.abs(viaZig.stress - fastest.stress) < 1e-6);
+  assert.ok(overlap(graph, easy, viaZig) < 0.05);
+});
+
+test('a waypoint behind you forces a U-turn', () => {
+  const graph = buildGraph(makeCity({ ways: [{ points: [[0, 0], [500, 0]], tags: res('Via Lunga') }] }));
+  const r = planVia(graph, [toLatLon([100, 0]), toLatLon([300, 0]), toLatLon([200, 0])]);
+  assert.equal(r.counts.uturns, 1);
+  assert.ok(Math.abs(r.distance - 300) < 2);
 });
